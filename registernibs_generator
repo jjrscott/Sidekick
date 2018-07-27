@@ -1,0 +1,139 @@
+#!/usr/bin/perl -CSL
+
+# MIT License
+# 
+# Copyright (c) 2018 John Scott
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+# This script creates a category/extension for registering XIBs with a table view, and
+# and constants for each reuse identifier. It should be run thus:
+# $ registernibs_generator [--swift-output] [--objc-output] --output <output path prefix> -- <list of XIB files>
+
+use utf8;
+use strict;
+use Data::Dumper;
+use Getopt::Long;
+use FindBin;                 # locate this script
+use lib $FindBin::Bin.'/lib';  # use the parent directory
+require Sidekick::File;
+
+my $outputPathPrefix;
+
+my %outputLanguage;
+
+GetOptions(
+	"output=s", \$outputPathPrefix,
+	"swift-output!" => \$outputLanguage{'swift'},
+	"objc-output!" => \$outputLanguage{'objc'},
+);
+
+my %reuseIdentifiers;
+
+foreach my $xibPath (@ARGV)
+{
+	my ($nibName) = $xibPath =~ m~([^/]+)\.xib~;
+	my $xibContent = read_file("UTF-8", $xibPath);
+
+	my ($reuseIdentifier) = $xibContent =~ m~<tableViewCell [^>]*?reuseIdentifier="([^"]+)"~g;
+	
+	if (length $reuseIdentifier)
+	{
+		$reuseIdentifiers{$nibName} = $reuseIdentifier;
+	}
+}
+
+# die Dumper(\%reuseIdentifiers);
+
+if ($outputLanguage{'objc'})
+{
+	my $hContent = "";
+	my $mContent = "";
+
+	$hContent .= qq(#import <UIKit/UIKit.h>\n);
+	$hContent .= "\n";
+
+	$mContent .= qq(#import "UITableView+RegisterNibs.h"\n);
+	$mContent .= "\n";
+
+	foreach my $nibName (sort keys %reuseIdentifiers)
+	{
+		$mContent .= sprintf qq(#import "%s.h"\n), $nibName;
+	}
+	$mContent .= "\n";
+
+	foreach my $nibName (sort keys %reuseIdentifiers)
+	{
+		$hContent .= sprintf qq(extern NSString* const %sReuseIdentifier;\n), $nibName;
+		$mContent .= sprintf qq(NSString* const %sReuseIdentifier = \@"%s";\n), $nibName, $reuseIdentifiers{$nibName};
+	}
+
+	$hContent .= "\n";
+	$mContent .= "\n";
+
+
+	$hContent .= qq(\@interface UITableView (RegisterNibs)\n);
+	$hContent .= qq(- (void)registerNibs;\n);
+	$hContent .= "\@end\n";
+
+	$mContent .= qq(\@implementation UITableView (RegisterNibs)\n);
+	$mContent .= qq(- (void)registerNibs {\n);
+
+	foreach my $nibName (sort keys %reuseIdentifiers)
+	{
+		$mContent .= sprintf qq(\t[self registerNib:[UINib nibWithNibName:@"%s" bundle:nil]\n\t     forCellReuseIdentifier:@"%s"];\n), $nibName, $reuseIdentifiers{$nibName};
+	}
+
+	$mContent .= qq(}\n);
+	$mContent .= "\@end\n";
+
+
+
+	write_file("UTF-8", $outputPathPrefix.'/UITableView+RegisterNibs.h', $hContent);
+	write_file("UTF-8", $outputPathPrefix.'/UITableView+RegisterNibs.m', $mContent);
+}
+
+if ($outputLanguage{'swift'})
+{
+	my $swiftContent = "";
+
+	$swiftContent .= qq(import UIKit\n);
+	$swiftContent .= "\n";
+
+	foreach my $nibName (sort keys %reuseIdentifiers)
+	{
+		$swiftContent .= sprintf qq(let %sReuseIdentifier = "%s";\n), $nibName, $reuseIdentifiers{$nibName};
+	}
+
+	$swiftContent .= "\n";
+	
+	$swiftContent .= qq(extension UITableView {\n);
+	$swiftContent .= qq(\tfunc registerNibs() {\n);
+
+	foreach my $nibName (sort keys %reuseIdentifiers)
+	{
+		$swiftContent .= sprintf qq(\t\tregister(UINib(nibName: "%s", bundle: nil), forCellReuseIdentifier: "%s")\n), $nibName, $reuseIdentifiers{$nibName};
+	}
+
+	$swiftContent .= qq(\t}\n);
+	$swiftContent .= "}\n";
+
+	write_file("UTF-8", $outputPathPrefix.'/UITableView+RegisterNibs.swift', $swiftContent);
+}

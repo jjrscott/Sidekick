@@ -33,7 +33,7 @@ use Data::Dumper;
 use Getopt::Long;
 use FindBin;                 # locate this script
 use lib $FindBin::Bin.'/lib';  # use the parent directory
-require Sidekick::File;
+use Sidekick::File qw(read_file write_file);
 
 my $outputPathPrefix;
 

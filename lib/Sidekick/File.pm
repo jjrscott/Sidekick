@@ -1,3 +1,10 @@
+
+package Sidekick::File;
+
+use base 'Exporter';
+
+our @EXPORT_OK = qw(read_file write_file);
+
 use DirHandle;
 
 sub search

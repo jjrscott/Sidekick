@@ -1,0 +1,357 @@
+#!/usr/bin/perl -CSL
+
+# MIT License
+# 
+# Copyright (c) 2018 John Scott
+# 
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+# 
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+# 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+
+# The script manages all a project's localizable strings
+# It should be run thus:
+# $ manage_localizations -source-root $SRCROOT -strings-root $SRCROOT/Shepherd -infoplist-file $INFOPLIST_FILE
+
+use utf8;
+use strict;
+use Data::Dumper;
+use Getopt::Long;
+use FindBin;
+use lib $FindBin::Bin.'/lib';
+use Sidekick::File qw(read_file write_file);
+use Digest::SHA1 qw(sha1_hex);
+use Math::BigInt;
+use Encode;
+use JSON::PP;
+
+my %infoPlistContexts =
+(
+	CFBundleDisplayName => "The user-visible name of the bundle; used by Siri and visible on the Home screen in iOS.",
+	CFBundleSpokenName => "The spoken name of the app.",
+	NSAppleMusicUsageDescription => "Specifies the reason for your app to use the media library.",
+	NSBluetoothPeripheralUsageDescription => "Specifies the reason for your app to use Bluetooth.",
+	NSCalendarsUsageDescription => "Specifies the reason for your app to access the user’s calendars.",
+	NSCameraUsageDescription => "Specifies the reason for your app to access the device’s camera.",
+	NSContactsUsageDescription => "Specifies the reason for your app to access the user’s contacts.",
+	NSHealthShareUsageDescription => "Specifies the reason for your app to read the user’s health data.",
+	NSHealthUpdateUsageDescription => "Specifies the reason for your app to make changes to the user’s health data.",
+	NSHomeKitUsageDescription => "Specifies the reason for your app to access the user’s HomeKit configuration data.",
+	NSLocationAlwaysUsageDescription => "Specifies the reason for your app to access the user’s location information at all times.",
+	NSLocationWhenInUseUsageDescription => "Specifies the reason for your app to access the user’s location information while your app is in use.",
+	NSMicrophoneUsageDescription => "Specifies the reason for your app to access any of the device’s microphones.",
+	NSMotionUsageDescription => "Specifies the reason for your app to access the device’s accelerometer.",
+	NSPhotoLibraryUsageDescription => "Specifies the reason for your app to access the user’s photo library.",
+	NSRemindersUsageDescription => "Specifies the reason for your app to access the user’s reminders.",
+	NSSiriUsageDescription => "Specifies the reason for your app to send user data to Siri.",
+	NSSpeechRecognitionUsageDescription => "Specifies the reason for your app to send user data to Apple’s speech recognition servers.",
+);
+
+
+my $sourceRoot;
+my $stringsRoot;
+my $infoPlistFile;
+
+GetOptions
+(
+	"source-root=s" => \$sourceRoot,
+	"strings-root=s" => \$stringsRoot,
+	"infoplist-file=s" => \$infoPlistFile,
+);
+
+my %entries;
+my %languages;
+
+my $exitValue = 0;
+
+if (length $infoPlistFile)
+{
+	my $json = decode_json qx(plutil -convert json -o - $infoPlistFile);
+	while (my ($key, $value) = each %{$json})
+	{
+		if (exists $infoPlistContexts{$key})
+		{
+			my %entry;
+			$entry{'hash'} = $key;
+			$entry{'value'} = $value;
+			$entry{'comment'} = $infoPlistContexts{$key};
+			$entries{'InfoPlist'}{$key} = \%entry;
+		}
+	}
+	
+}
+
+# die Dumper(\%entries);
+
+
+sub handleFiles
+{
+	my @path = @_;
+	my $path = join "/", @path;
+	
+	return 0 if $path[-1] =~ m!^\.!;
+	return 0 if $path[-1] eq 'Base.lproj';
+	
+	shift @_;
+	
+	if ($path[-1] =~ m!\.(c|m)$! && $path[-1] !~ /^ManageLocalizations\.(h|m)$/)
+	{
+		my $content = read_file("UTF-8", $path);
+		
+		while ($content =~ m!(?<function>MLLocalizedString|MLLocalizedHtml)(\s*\(\s*((@"(?<value>((\\.)|[^"])*)")|(?<variable>[^\s,]+))\s*,\s*((@"(?<comment>(\\.)|[^"]+)")|(nil))\s*[),])?!gc)
+		{
+			my %entry = %+;
+			
+			my ($line, $column) = location($content, length($`));
+			
+			$entry{'offset'} = length($`);
+			$entry{'file'} = $path;
+			$entry{'line'} = $line;
+			$entry{'column'} = $column;
+			$entry{'hash'} = hash($entry{'value'}, $entry{'comment'});
+		
+			while (my ($key, $value) = each %entry)
+			{
+				$entries{'Localizable'}{$entry{'hash'}}{$key} = $value;
+			}
+		}
+		
+		while ($content =~ m!(?<prefix>[^\n]+\.text = )@"(?<value>((\\.)|[^"])*)"[^\n]+!gc)
+		{
+			my ($line, $column) = location($content, length($`) + length($+{'prefix'}) - 1);
+
+			printf qq(%s:%d:%d: warning: Non-localized string setting\n), $path, $line, $column;
+# 			warn sprintf qq(%s:%d:%d: warning: use function 'labs' instead\n%s\n%s^~~\n%sMLLocalizedString(@"%s", sss)\n), $path, $line, $column, $&, " " x ($column - 1), " " x ($column - 1), $+{'value'};
+
+			$exitValue=0;
+# 			exit $exitValue;
+		}
+	}
+	
+	if (my ($table) = $path[-1] =~ m!^([^.]+)\.(strings)$!)
+	{
+		my $content = read_file("UTF-8", $path);
+# 		warn $content;
+		$languages{$path[-2]}++;
+		
+		my @tokens;
+		
+# 		while ($content =~ m!(?<string>\/\*.*?\*\/)?\s*"(?<string>((\\.)|[^"])*)"\s*=\s*"(?<value>((\\.)|[^"])*)";!gc)
+		while ($content =~ m!(\/\*.*?\*\/)|(\/\/[^\n]*\n?)|("(?<value>((\\.)|[^"])*)")|(?<token>[(){}])!gsc)
+		{
+			push @tokens, {%+} if %+;			
+		}
+		
+		my @stack = ([]);
+		
+		foreach my $token (@tokens)
+		{
+			if ($token->{'token'} eq '(' || $token->{'token'} eq '{')
+			{
+				my $array = [];
+				push @stack, $array;
+			}
+			elsif ($token->{'token'} eq ')')
+			{
+				my $array = pop @stack;
+				push @{$stack[-1]}, $array;
+			}
+			elsif ($token->{'token'} eq '}')
+			{
+				my $dictionary = pop @stack;
+				push @{$stack[-1]}, {@{$dictionary}};
+			}
+			else
+			{
+				push @{$stack[-1]}, $token->{'value'};
+			}
+		}
+		my %strings = @{$stack[-1]};
+		while (my ($hash, $value) = each %strings)
+		{
+			$entries{$table}{$hash}{$path[-2]} = $value;
+		}
+				
+# 		warn Dumper($path, $root);
+	}
+	
+	return 1;
+}
+
+search(\&handleFiles, $sourceRoot);
+
+# exit;
+
+# die dumpValue(\%languages);
+
+foreach my $table (sort keys %entries)
+{
+	foreach my $entry (sort {$a->{'hash'} cmp $b->{'hash'}} grep {length $_->{'hash'}} values %{$entries{$table}})
+	{
+		if ($entry->{'function'} eq 'NSLocalizedString' && !length $entry->{'comment'})
+		{
+			printf qq(%s:%d:%d: warning:  Comment should be a string literal\n), $entry->{'file'}, $entry->{'line'}, $entry->{'column'};
+		}
+	
+		if ($entry->{'function'} eq 'NSLocalizedString' && !length $entry->{'value'})
+		{
+			printf qq(%s:%d:%d: warning:  Value should be a string literal\n), $entry->{'file'}, $entry->{'line'}, $entry->{'column'};
+		}
+	
+		if (($entry->{'function'} eq 'MLLocalizedString' || $entry->{'function'} eq 'MLLocalizedHtml') && !length $entry->{'comment'})
+		{
+			printf qq(%s:%d:%d: error:  Context must be a string literal\n), $entry->{'file'}, $entry->{'line'}, $entry->{'column'};
+					$exitValue=1;
+		}
+	
+		if (($entry->{'function'} eq 'MLLocalizedString' || $entry->{'function'} eq 'MLLocalizedHtml') && $entry->{'value'} eq $entry->{'comment'})
+		{
+			printf qq(%s:%d:%d: error:  Context must be different to the value\n), $entry->{'file'}, $entry->{'line'}, $entry->{'column'};
+					$exitValue=1;
+		}
+	
+		if (($entry->{'function'} eq 'MLLocalizedString' || $entry->{'function'} eq 'MLLocalizedHtml') && !exists $entry->{'value'})
+		{
+			printf qq(%s:%d:%d: error:  Value must be a string literal\n), $entry->{'file'}, $entry->{'line'}, $entry->{'column'};
+					$exitValue=1;
+		}
+	}
+}
+# die Dumper(\%entries);
+
+foreach my $table (sort keys %entries)
+{
+	{
+		my $content = "";
+
+		foreach my $entry (sort {lc $a->{'value'} cmp lc $b->{'value'} || lc $a->{'comment'} cmp lc $b->{'comment'} || $a->{'hash'} cmp $b->{'hash'}} grep {length $_->{'hash'}} values %{$entries{$table}})
+		{
+			$content .= sprintf qq(/*\n   %s\n   %s\n*/\n"%s" = %s;\n\n), $entry->{'value'}, $entry->{'comment'}, $entry->{'hash'}, dumpValue($entry->{'value'});
+		}
+	
+		write_file("UTF-8", $stringsRoot."/Base.lproj/".$table.".strings", $content);
+	}
+
+	foreach my $language (sort keys %languages)
+	{
+		my $content = "";
+
+		foreach my $entry (sort {lc $a->{'value'} cmp lc $b->{'value'} || lc $a->{'comment'} cmp lc $b->{'comment'} || $a->{'hash'} cmp $b->{'hash'}} grep {length $_->{'hash'}} values %{$entries{$table}})
+		{
+			next unless defined $entry->{$language};
+			$content .= sprintf qq(/*\n   %s\n   %s\n*/\n"%s" = %s;\n\n), $entry->{'value'}, $entry->{'comment'},  $entry->{'hash'}, dumpValue($entry->{$language});		
+		}
+	
+		write_file("UTF-8", $stringsRoot."/".$language."/".$table.".strings", $content);
+	
+	}
+
+	if (length $ENV{'DERIVED_SOURCES_DIR'})
+	{
+		my $derivedSourcesDir = $ENV{'BUILT_PRODUCTS_DIR'}.'/'.$ENV{'WRAPPER_NAME'};
+	
+		foreach my $language (sort keys %languages)
+		{
+			my $content = "";
+			
+# 			warn Dumper($entries{$table});
+
+			foreach my $entry (sort {lc $a->{'value'} cmp lc $b->{'value'} || lc $a->{'comment'} cmp lc $b->{'comment'} || $a->{'hash'} cmp $b->{'hash'}} grep {length $_->{'hash'}} values %{$entries{$table}})
+			{
+				my $value = $entry->{$language};
+				if (defined $value && '' eq ref $value)# && $entry->{'value'} =~ /[^%]%[^%]/)
+				{
+					$content .= sprintf qq("%s" = %s;\n), $entry->{'hash'}, dumpValue($value);
+				}
+			}
+	
+			write_file("UTF-8", $derivedSourcesDir."/".$language."/".$table.".strings", $content);
+		}
+	
+		foreach my $language (sort keys %languages)
+		{
+			my $content = "";
+
+			foreach my $entry (sort {lc $a->{'value'} cmp lc $b->{'value'} || lc $a->{'comment'} cmp lc $b->{'comment'} || $a->{'hash'} cmp $b->{'hash'}} grep {length $_->{'hash'}} values %{$entries{$table}})
+			{
+				my $value = $entry->{$language};
+				if (defined $value && ref $value)# && $entry->{'value'} =~ /[^%]%[^%]/)
+				{
+					$content .= sprintf qq("%s" = %s;\n), $entry->{'hash'}, dumpValue($value);
+				}
+			}
+
+			write_file("UTF-8", $derivedSourcesDir."/".$language."/".$table.".stringsdict", $content);
+		}
+	}
+
+}
+
+exit $exitValue;
+
+
+sub hash
+{
+	my ($value, $context) = @_;
+# 	warn $value."\x1f".$context."\n";
+	return substr sha1_hex(Encode::encode_utf8($value."\x1f".$context)), 0, 12;
+}
+
+sub location
+{
+	my ($string, $offset) = @_;
+	my $line = 1;
+	my $column = 1;
+	foreach my $character (split //, $string)
+	{
+		last if ($offset--<=0);
+
+		if ($character eq "\n")
+		{
+			$line += 1;
+			$column = 1;
+		}
+		$column += 1;		
+	}
+	return ($line, $column);
+}
+
+sub dumpValue
+{
+	my ($value, $prefix) = @_;
+	my $content = "";
+	if ('HASH' eq ref $value)
+	{
+		$content .= qq({\n);
+		
+		foreach my $key (sort keys %{$value})
+		{
+			$content .= sprintf qq(%s"%s" = %s;\n), $prefix . "  ", $key, dumpValue($value->{$key}, $prefix . "  ");
+		}
+
+		$content .= sprintf qq(%s}), $prefix;
+	}
+	elsif ('ARRAY' eq ref $value)
+	{
+	
+	}
+	else
+	{
+		$content .= sprintf qq("%s"), $value;
+	}
+	return $content;
+}

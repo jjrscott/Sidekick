@@ -8,13 +8,59 @@ Treat with care.
 
 ## Scripts
 
+### build_scheme ⚠️
+
+Build and archive release of a project and upload it to the AppStore.
+
+#### Usage
+
+First you need to mke a few changes to your xCode project.
+
+Add these values to your Build Settings:
+
+```
+PRODUCT_BUILD = 0
+PRODUCT_VERSION = 0.0.0
+```
+
+Then change Info.plist to use these settings:
+
+```xml
+<key>CFBundleShortVersionString</key>
+<string>$(PRODUCT_VERSION)</string>
+<key>CFBundleVersion</key>
+<string>$(PRODUCT_BUILD)</string>
+```
+
+Now run the script
+
+```
+Sidekick/build_scheme -scheme <scheme> -product-version <product version> [-product-build <build number>] -username <iTunes Connect email> -password <iTunes Connect passord or app token>
+```
+
+If You do not supply a build number then the script with search for the latest tag of the format `build/NNNNN` and add 1 to it.
+
+The script will produce:
+
+1. a directory in your Downloads containing all the build output.
+1. an IPA on iTunes Connect with the name `$(PRODUCT_NAME)_${GIT_COMMIT_SHA1}.ipa`. Note that the IPA name contains the commit SHA1 for trackability.
+2. a tag named `build/${PRODUCT_BUILD}`
+
+#### Example
+
+```
+Sidekick/build_scheme -scheme KT -product-version 1.0.0 -product-build 10
+```
+
 ### check_storyboard.pl ⚠️
 
 Checks for issues in storyboards that ibtool does not worry about. For example, that the storyboard has an entry point.
 
 #### Example
 
-	Sidekick/check_storyboard.pl "${SOURCE_ROOT}"
+```
+Sidekick/check_storyboard.pl "${SOURCE_ROOT}"
+```
 
 ### imageset_generator ⚠️
 
@@ -28,7 +74,9 @@ Sidekick/imageset_generator -imageset_path <imageset path>  -source_path <source
 
 #### Example
 
-	Sidekick/imageset_generator -imageset_path ${TARGET_NAME}/Assets.xcassets/AppIcon.appiconset -source_path ${TARGET_NAME}/AppIcon.pdf
+```
+Sidekick/imageset_generator -imageset_path ${TARGET_NAME}/Assets.xcassets/AppIcon.appiconset -source_path ${TARGET_NAME}/AppIcon.pdf
+```
 	
 ### manage_localizations ⚠️
 
@@ -86,8 +134,12 @@ Remove a view from a storyboard and the constant will also be removed. Any code 
 
 #### Usage
 
-	Sidekick/storyboard_constants -storyboard <storyboard path> -output <output path prefix>
+```
+Sidekick/storyboard_constants -storyboard <storyboard path> -output <output path prefix>
+```
 
 #### Example
 
-	Scripts/storyboard_constants -storyboard ${TARGET_NAME}/Base.lproj/Main.storyboard -output ${TARGET_NAME}/MainStoryboard
+```
+Sidekick/storyboard_constants -storyboard ${TARGET_NAME}/Base.lproj/Main.storyboard -output ${TARGET_NAME}/MainStoryboard
+```

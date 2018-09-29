@@ -23,7 +23,7 @@
 # SOFTWARE.
 
 
-# This script creates a category/extension for registering XIBs with a table view, and
+# This script creates a category/extension for registering XIBs with a table view,
 # and constants for each reuse identifier. It should be run thus:
 # $ registernibs_generator [--swift-output] [--objc-output] --output <output path prefix> -- <list of XIB files>
 

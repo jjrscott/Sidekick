@@ -91,6 +91,34 @@ You will need to add `ManageLocalizations.h` and `ManageLocalizations.m` to your
 ```
 Sidekick/manage_localizations -source-root $SRCROOT -strings-root $SRCROOT/${TARGET_NAME} -infoplist-file $INFOPLIST_FILE
 ```
+
+### pbxdiff ⚠️
+
+Performs a tree based diff of a `pbxproj` file
+
+#### Usage
+
+```bash
+Sidekick/pbxdiff [--colors] [--lines-of-content <padding>] <old file> <new file>
+```
+
+#### Example
+
+```bash
+Sidekick/pbxdiff Old.xcodeproj/project.pbxproj New.xcodeproj/project.pbxproj
+```
+
+or if you wish to diff via git then add something like this to the `.gitconfig` file:
+
+```ini
+[diff]
+    tool = pbxdiff
+[difftool "pbxdiff"]
+    cmd =  Sidekick/pbxdiff \"$LOCAL\" \"$REMOTE\"
+[difftool]
+	prompt = false
+```
+
 ### registernibs_generator ⚠️
 
 Enables conpile time connection to the internals of TableViewCell based XIBs.
